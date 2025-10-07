@@ -1,0 +1,8 @@
+# /etc/clamav/clamd.conf
+
+LocalSocket /var/run/clamav/clamd.ctl
+FixStaleSocket true
+LocalSocketGroup clamav
+LocalSocketMode 660
+Foreground false
+# Add other configurations as needed

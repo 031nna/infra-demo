@@ -1,0 +1,23 @@
+# Example freshclam.conf.j2 template
+
+# Update settings
+DatabaseDirectory /var/lib/clamav
+UpdateLogFile /var/log/clamav/freshclam.log
+LogSyslog false
+LogFacility LOG_LOCAL6
+LogVerbose false
+
+# Mirror settings
+DNSDatabaseInfo current.cvd.clamav.net
+DatabaseMirror db.XY.clamav.net
+
+# Proxy settings (if required)
+# HTTPProxyServer proxy.example.com
+# HTTPProxyPort 1234
+
+# Database checks
+Checks 24
+Foreground true
+DatabaseOwner clamav
+
+# Additional configuration options as needed

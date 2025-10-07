@@ -1,0 +1,11 @@
+[app_servers]
+%{ for ip in app_servers ~}
+${ip} ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_rsa
+%{ endfor ~}
+
+
+[staging_server]
+%{ for ip in staging_server ~}
+${ip} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+%{ endfor ~}
+

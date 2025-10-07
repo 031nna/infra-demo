@@ -1,0 +1,5 @@
+---
+- import_playbook: src/server-configure.yml
+- import_playbook: src/container-configure.yml
+- import_playbook: src/app-deploy.yml
+- import_playbook: src/run-docker-compose.yml

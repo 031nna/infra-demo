@@ -1,0 +1,224 @@
+---
+- name: Deploying demo server
+  hosts: staging_server #app_servers
+  become: yes 
+  environment:
+    DOCKER_API_VERSION: "1.25"
+    PATH: "{{ ansible_env.PATH }}:/usr/bin"
+  vars:
+    staging_domain_name: "03i.co"
+    ansible_ssh_timeout: 60
+    ansible_become_timeout: 60
+    docker_compose_version: "v2.32.4"
+
+  tasks:
+    - name: Remove APT lock files (if present)
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - /var/lib/dpkg/lock
+        - /var/lib/dpkg/lock-frontend
+        - /var/cache/apt/archives/lock
+      become: yes
+
+    - name: Reconfigure dpkg to fix broken states
+      command: dpkg --configure -a
+      become: yes
+      changed_when: false
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+      become: yes
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+      become: yes
+
+    - name: Open necessary ports with iptables
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ item }}"
+        jump: ACCEPT
+      loop:
+        - 22   # SSH
+        - 80   # HTTP
+        - 443  # HTTPS
+        - 8181 # Custom HTTP port
+        - 3306 # MySQL
+ 
+    - name: Install aptitude
+      apt:
+        name: aptitude
+        state: latest
+        update_cache: true
+
+    - name: Install Python 3
+      apt:
+        name: python3
+        state: present
+
+    - name: Install Python if not already installed
+      raw: test -e /usr/bin/python3 || (apt-get update && apt-get install -y python3)
+
+    - name: Install pip
+      raw: test -e /usr/bin/pip || (curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py)
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu focal stable
+        state: present
+
+    - name: Update apt and install docker-ce
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: true
+
+    - name: Install required dependencies
+      apt:
+        name: curl
+        state: present
+
+    - name: Set Docker Compose binary download URL for ARM or x86
+      set_fact:
+        docker_compose_url: >
+          {% if ansible_architecture == 'aarch64' %}
+            https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-aarch64
+          {% else %}
+            https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-x86_64
+          {% endif %}
+
+    - name: Download Docker Compose binary
+      get_url:
+        url: "{{ docker_compose_url }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Verify Docker Compose installation
+      command: /usr/local/bin/docker-compose --version
+      register: docker_compose_version_output
+
+    - name: Show Docker Compose version
+      debug:
+        msg: "{{ docker_compose_version_output.stdout }}"
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Reset SSH connection to apply group changes
+      meta: reset_connection
+
+    - name: install nano
+      apt:
+        name: nano
+        state: present
+        update_cache: true
+
+    - name: install clamav
+      apt:
+        name: clamav
+        state: present
+        update_cache: true
+ 
+    - name: Remove default Nginx config
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      become: yes
+
+    - name: Copy Nginx sites available config
+      template:
+        src: ../../giggl/bin/nginx-proxy-staging.conf
+        dest: /etc/nginx/sites-available/{{ staging_domain_name }}.conf
+      become: yes
+
+    - name: Enable Nginx site
+      file:
+        src: /etc/nginx/sites-available/{{ staging_domain_name }}.conf
+        dest: /etc/nginx/sites-enabled/{{ staging_domain_name }}.conf
+        state: link
+      become: yes
+
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+
+    - name: install fail2ban
+      apt:
+        name: fail2ban
+        state: present
+        update_cache: true
+
+    - name: Ensure iptables-persistent is installed
+      ansible.builtin.package:
+        name: iptables-persistent
+        state: present
+
+    - name: Save iptables rules
+      ansible.builtin.shell: iptables-save > /etc/iptables/rules.v4
+
+    - name: Ensure iptables service is started and enabled
+      ansible.builtin.service:
+        name: iptables
+        state: started
+        enabled: yes
+
+    - block:
+        - name: start and enable docker service
+          service:
+            name: docker
+            state: started
+            enabled: yes
+
+    - name: Install Docker Module for Python
+      command:
+        cmd: "/usr/bin/python3 -m pip install docker"
+
+    - name: Deploy app to server
+      synchronize:
+        src: ../../giggl/  
+        dest: /usr/share/nginx/html/
+        recursive: yes  
+        delete: yes 
+      
+    - name: Copy .env file to server
+      copy:
+        src: ../../giggl/.env.staging
+        dest: /usr/share/nginx/html/.env
+      
+    - name: Copy docker compose file to server
+      copy:
+        src: ../../giggl/docker-compose-staging.yml
+        dest: /usr/share/nginx/html/docker-compose.yml
+
+    - name: Check if docker-compose.yml exists
+      stat:
+        path: /usr/share/nginx/html/docker-compose.yml
+      register: compose_file
+
+    - name: Prune unused Docker system
+      command: docker system prune -a -f
+
+    - name: Prune unused Docker volumes
+      command: docker volume prune -f
+
+    - name: Stop any running containers
+      command: docker-compose -f /usr/share/nginx/html/docker-compose.yml down --remove-orphans
+      when: compose_file.stat.exists 
+      
+    - name: Run Docker Compose
+      command: docker compose -f /usr/share/nginx/html/docker-compose.yml up --build -d
