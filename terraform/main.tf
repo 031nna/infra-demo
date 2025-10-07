@@ -112,7 +112,7 @@ resource "digitalocean_firewall" "web" {
 
   inbound_rule {
     protocol         = "tcp"
-    port_range       = "8181"
+    port_range       = "8282"
     source_addresses = ["0.0.0.0/0", "::/0"] 
     # @TODO; this source_addresses port range opens up to the whole, internet, 
     # might want to make it only for the host ip ['HOST_IP']
@@ -262,14 +262,14 @@ resource "digitalocean_loadbalancer" "web-lb" {
   forwarding_rule {
     entry_port = 80
     entry_protocol = "http"
-    target_port = 8181 # switch to 80 to foward to cloudflare, 8181 if using servers lb without cloudflare 
+    target_port = 8282 # switch to 80 to foward to cloudflare, 8282 if using servers lb without cloudflare 
     target_protocol = "http"
   }
 
   forwarding_rule {
     entry_port       = 443
     entry_protocol   = "https"
-    target_port      = 8181
+    target_port      = 8282
     target_protocol  = "https"
     # certificate_name = digitalocean_certificate.cert.name
     tls_passthrough = true # Terminate TLS on backend
@@ -343,7 +343,7 @@ resource "digitalocean_firewall" "http-https" {
 
   inbound_rule {
     protocol                  = "tcp"
-    port_range                = "8181"
+    port_range                = "8282"
     source_load_balancer_uids = [digitalocean_loadbalancer.web-lb.id]
   }
 
